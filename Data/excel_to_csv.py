@@ -2,10 +2,10 @@ import pandas as pd
 import os
 
 # Directory containing the Excel files
-directory = 'Data/BBG_Excels'
+directory = 'BBG_Excels'
 
 # directory to place the Csv files
-directoryTo = 'Data/csv'
+directoryTo = 'csv'
 
 # Iterate over each file in the directory
 for filename in os.listdir(directory):
