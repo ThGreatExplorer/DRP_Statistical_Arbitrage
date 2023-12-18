@@ -14,17 +14,17 @@ for filename in os.listdir(directory):
         # Remove the extension for naming the CSV files
         file_base_name = os.path.splitext(filename)[0]
         
-        #if (file_base_name.__contains__("_5")):
+        if (file_base_name.__contains__("_15Min")):
 
-        # Read the Excel file
-        xls = pd.ExcelFile(file_path)
+            # Read the Excel file
+            xls = pd.ExcelFile(file_path)
 
-        # Save each sheet as a CSV
-        for sheet_name in xls.sheet_names:
-            df = xls.parse(sheet_name)
-            csv_file_name = f'{file_base_name}_{sheet_name}.csv'
-            print(csv_file_name)
-            csv_file_path = os.path.join(directoryTo, csv_file_name)
-            df.to_csv(csv_file_path, index=False)
+            # Save each sheet as a CSV
+            for sheet_name in xls.sheet_names:
+                df = xls.parse(sheet_name)
+                csv_file_name = f'{file_base_name}_{sheet_name}.csv'
+                print(csv_file_name)
+                csv_file_path = os.path.join(directoryTo, csv_file_name)
+                df.to_csv(csv_file_path, index=False)
 
 print("Conversion complete.")
