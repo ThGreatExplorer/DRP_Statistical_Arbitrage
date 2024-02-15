@@ -124,8 +124,9 @@ def find_coint(y0, y1, alpha=0.05):
     results = model.fit()
     
     # Get the estimated coefficient (beta) and standard error
-    beta = results.params[0]
-    std_err = results.bse[0]
+    beta = results.params.iloc[0]
+    std_err = results.bse.iloc[0]
+
     
     # Perform cointegration test
     _, p_value, _ = coint(y0, y1)
@@ -173,7 +174,7 @@ class PairTradingTest:
         self.data = data
         i = 1
         while (True):
-            if (i > 10 or i * self.coint_timeframe > len(self.data.data)):
+            if (i > 20 or i * self.coint_timeframe > len(self.data.data)):
                 raise ValueError("Can't find any cointegration relationship between the two time series")
             # intialize the cointegration relationship as some starting beta based on cointegration of the first y days where y = i * coint_timeframes
             cointegrated, beta_vals = find_coint(
@@ -186,34 +187,45 @@ class PairTradingTest:
                 break
             i+=1
         self.threshold = threshold
-        self.beta_history = [self.beta_vals[1]]
+        self.beta_history = []
+        self.beta_history.append(self.beta_vals[1])
         self.asset1_name = data.data.iloc[:,0].name
         self.asset2_name = data.data.iloc[:,1].name
 
          # Initialize trading signals history DataFrame with pre-allocated memory
+        """
         signals_columns = ['Date', 'Signal']
         signals_data = np.zeros((len(data.data), len(signals_columns)), dtype=object)
         signals_data[:, 0] = data.data.index
         self.trading_signals_history = pd.DataFrame(signals_data, columns=signals_columns)
         self.trading_signals_history.set_index('Date', inplace=True)
+        """
+        self.portfolio = []  # List to hold portfolio data
+        self.trading_signals_history = []  # List to hold trading signals data
 
         # Calculate initial positions based on the specified beta
         initial_asset2_position = portfolio / (1 + self.beta_vals[1])  # Allocate asset2 with the remaining portfolio
         initial_asset1_position = self.beta_vals[1] * initial_asset2_position  # Calculate asset1 position based on beta
 
-        # Initialize portfolio DataFrame with pre-allocated memory
+        # Allocate initial portfolio
+        initial_asset2_position = portfolio / (1 + self.beta_vals[1])  # Allocate asset2 with the remaining portfolio
+        initial_asset1_position = self.beta_vals[1] * initial_asset2_position  # Calculate asset1 position based on beta
+        self.portfolio.append([data.data.index[self.test_idx - 1], initial_asset1_position, initial_asset2_position, 0])
+
+        """
         portfolio_columns = ['Date', f'{self.asset1_name}_Position', f'{self.asset2_name}_Position', 'Cash_Position']
         portfolio_data = np.zeros((len(data.data) - self.test_idx + 1, len(portfolio_columns)), dtype=float)
         portfolio_data[:, 0] = data.data.index[self.test_idx - 1:]
         self.portfolio = pd.DataFrame(portfolio_data, columns=portfolio_columns)
         self.portfolio['Date'] = pd.to_datetime(self.portfolio['Date'])
         self.portfolio.set_index('Date', inplace=True)
-
+        
 
         # allocate intial portfolio
         self.portfolio.loc[self.portfolio.index[0], f'{self.asset1_name}_Position'] = initial_asset1_position
         self.portfolio.loc[self.portfolio.index[0], f'{self.asset2_name}_Position'] = initial_asset2_position
         self.portfolio.loc[self.portfolio.index[0], 'Cash_Position'] = 0
+        """
     
     def signal_generation(self, past_data) -> int:
         """
@@ -232,34 +244,41 @@ class PairTradingTest:
         cointegrated, beta_vals = find_coint(past_data.iloc[:,0], past_data.iloc[:,1])
         
         if not cointegrated:
+            # set the beta to 0 representing that the past relationship doesn't hold
+            self.beta_vals = (0,0,0)
             # return none
             return None,None
-
-        # not within the same beta bounds, update history and beta
-        if not (self.beta_vals[0] <= beta_vals[1] <= beta_vals[2]):
-            self.beta_history.append(beta_vals[1])
-            self.beta_vals = beta_vals
-
-        # generate trading signal
-        # spread = asset1 - beta * asset2
-        spread = past_data.iloc[:, 0] - self.beta_vals[1] * past_data.iloc[:, 1]
-        
-        # Calculate mean and standard deviation of the spread
-        spread_mean = np.mean(spread)
-        spread_std = np.std(spread)
-        
-        # Calculate trading signals for each asset
-        if spread[-1] > spread_mean + self.threshold * spread_std:
-            signal_asset1 = -1  
-            signal_asset2 = 1   
-        elif spread[-1] < spread_mean - self.threshold * spread_std:
-            signal_asset1 = 1   
-            signal_asset2 = -1 
         else:
-            signal_asset1 = 0   
-            signal_asset2 = 0   
-        
-        return signal_asset1, signal_asset2
+            # if the self.beta_vals was previously set to 0, meaning cointegration failed, then set a new cointegration relationship
+            if self.beta_vals[1] == 0:
+                self.beta_vals = beta_vals
+                self.beta_history.append(self.beta_vals[1])
+
+            # not within the same beta bounds, update history and beta, or 
+            if not (self.beta_vals[0] <= beta_vals[1] <= self.beta_vals[2]):
+                self.beta_vals = beta_vals
+                self.beta_history.append(self.beta_vals[1])
+
+            # generate trading signal
+            # spread = asset1 - beta * asset2
+            spread = past_data.iloc[:, 0] - self.beta_vals[1] * past_data.iloc[:, 1]
+            
+            # Calculate mean and standard deviation of the spread
+            spread_mean = np.mean(spread)
+            spread_std = np.std(spread)
+            
+            # Calculate trading signals for each asset
+            if spread.iloc[-1] > spread_mean + self.threshold * spread_std:
+                signal_asset1 = -1  
+                signal_asset2 = 1   
+            elif spread.iloc[-1] < spread_mean - self.threshold * spread_std:
+                signal_asset1 = 1   
+                signal_asset2 = -1 
+            else:
+                signal_asset1 = 0   
+                signal_asset2 = 0   
+            
+            return signal_asset1, signal_asset2
     
     def update_portfolio_positions(self, timestep, signal_asset1, signal_asset2):
         """
@@ -280,27 +299,23 @@ class PairTradingTest:
         curr_date = self.data.data.index[timestep]
     
         if signal_asset1 == None or signal_asset2 == None:
-            if self.trading_signals_history.iloc[timestep-1]['Signal'] != 'exit':
+            entry = [curr_date, 0, 0, self.portfolio[-1][3] + self.portfolio[-1][1] + self.portfolio[-1][2]]
+            self.portfolio.append(entry)
+            if len(self.trading_signals_history) == 0 or self.trading_signals_history[-1][1] != 'exit':
                 # liquidate the portfolio when it's not already been liquidated, i.e the previous signal was also exit since then we never bought or sell and re-entered
-                entry = {
-                    f'{self.asset1_name}_Position': 0,
-                    f'{self.asset2_name}_Position': 0,
-                    'Cash_Position': self.portfolio.iloc[-1]['Cash_Position'] + self.portfolio.iloc[-1][f'{self.asset1_name}_Position'] + self.portfolio.iloc[-1][f'{self.asset2_name}_Position']
-                }
-                #print(self.portfolio)
-                self.portfolio.loc[curr_date, f'{self.asset1_name}_Position'] = 0
-                self.portfolio.loc[curr_date, f'{self.asset2_name}_Position'] = 0
-                self.portfolio.loc[curr_date, f'Cash_Position'] = self.portfolio.iloc[-1]['Cash_Position'] + self.portfolio.iloc[-1][f'{self.asset1_name}_Position'] + self.portfolio.iloc[-1][f'{self.asset2_name}_Position']
-                self.trading_signals_history.loc[curr_date, 'Signal'] = 'exit'
+                self.trading_signals_history.append([curr_date, 'exit'])
 
         else:
             # Calculate position sizes for assets based on portfolio value
-            asset1_value = self.portfolio.iloc[-1][f'{self.asset1_name}_Position']
-            asset2_value = self.portfolio.iloc[-1][f'{self.asset2_name}_Position']
-            cash_value = self.portfolio.iloc[-1]['Cash_Position']
+            asset1_value = self.portfolio[-1][1]
+            asset2_value = self.portfolio[-1][2]
+            cash_value = self.portfolio[-1][3]
+
 
             curr_asset1_value = asset1_value * (1 + asset1_curr_px - asset1_last_px)
             curr_asset2_value = asset2_value * (1 + asset2_curr_px - asset2_last_px)
+
+            #TODO implement some sort of stop signal?
 
             asset1_position = curr_asset1_value
             asset2_position = curr_asset2_value
@@ -313,58 +328,60 @@ class PairTradingTest:
                     asset1_allocation = self.beta_vals[1] * asset2_allocation  
                     asset1_position += asset1_allocation
                     asset2_position += asset2_allocation
+                    cash_value = 0
 
             #TODO same behavior for signals
             elif signal_asset1 == -1 and signal_asset2 == 1:
-                # reallocate portfolio so that asset1 position = beta * asset2 position
+                total_position = asset1_position + asset2_position + cash_value
 
-                # allocate everything to asset1
-                asset1_position += asset2_position + cash_value
+                # set cash to 0
                 cash_value = 0
-                asset1_position = 0
 
-                asset2_position = asset1_position / (1 + self.beta_vals[1]) 
-                asset1_position = asset1_position - asset2_position
-                self.trading_signals_history.loc[curr_date, 'Signal'] = 'sell'
+                # reallocate portfolio so that asset1 position = beta * asset2 position
+                asset2_position = total_position / (1 + self.beta_vals[1]) 
+                asset1_position = total_position - asset2_position
+                self.trading_signals_history.append([curr_date, 'sell'])
                 
             elif signal_asset1 == 1 and signal_asset2 == -1:
-                 # reallocate portfolio so that asset1 position = beta * asset2 position
+                total_position = asset1_position + asset2_position + cash_value
 
-                # allocate everything to asset1
-                asset1_position += asset2_position + cash_value
+                # set cash to 0
                 cash_value = 0
-                asset1_position = 0
 
-                asset2_position = asset1_position / (1 + self.beta_vals[1]) 
-                asset1_position = asset1_position - asset2_position
-                self.trading_signals_history.loc[curr_date, 'Signal'] = 'buy'
+                # reallocate portfolio so that asset1 position = beta * asset2 position
+                asset2_position = total_position / (1 + self.beta_vals[1]) 
+                asset1_position = total_position - asset2_position
+                
+                self.trading_signals_history.append([curr_date, 'buy'])
 
             else:
                 raise ValueError(f"Improper signal given: {signal_asset1}, {signal_asset2}")
             
-            # Update portfolio with new positions
-            #entry = {
-            #    f'{self.asset1_name}_Position': asset1_position,
-            #    f'{self.asset2_name}_Position': asset2_position,
-            #    'Cash_Position': cash_value}
-            # self.portfolio.loc[curr_date] = entry
-            self.portfolio.loc[curr_date, f'{self.asset1_name}_Position'] = asset1_position
-            self.portfolio.loc[curr_date, f'{self.asset2_name}_Position'] = asset2_position
-            self.portfolio.loc[curr_date, f'Cash_Position'] = cash_value
+            entry = [curr_date, asset1_position, asset2_position, cash_value]
+            self.portfolio.append(entry)
 
 
     def __backtest__(self):
         """
-        Backtest the pair trading strategy.
+        Backtest the pair trading strategy. Converts the portfolio and trading_signals_history fields to dataframes
         """
         #print(self.test_idx)
         for i in range(self.test_idx, len(self.data.data)):
-            print(i)
-            print(i - self.coint_timeframe)
             past_data = self.data.data.iloc[i - self.coint_timeframe:i]
             signal_asset1, signal_asset2 = self.signal_generation(past_data)
 
             self.update_portfolio_positions(i, signal_asset1, signal_asset2)
+
+        # Convert lists to DataFrames
+        columns = ['Date', f'{self.asset1_name}_Position', f'{self.asset2_name}_Position', 'Cash_Position']
+        self.portfolio = pd.DataFrame(self.portfolio, columns=columns)
+        self.portfolio['Date'] = pd.to_datetime(self.portfolio['Date'])
+        self.portfolio.set_index('Date', inplace=True)
+
+        signals_columns = ['Date', 'Signal']
+        self.trading_signals_history = pd.DataFrame(self.trading_signals_history, columns=signals_columns)
+        self.trading_signals_history['Date'] = pd.to_datetime(self.trading_signals_history['Date'])
+        self.trading_signals_history.set_index('Date', inplace=True)
 
         print(self.portfolio)
 
@@ -431,9 +448,11 @@ def main():
     data = initialize_data(**series)
     coint(data.data.iloc[:,0],data.data.iloc[:,1])
     data.data = data.data.iloc[:500]
-    strategy :PairTradingTest = PairTradingTest(data,30)
+    strategy :PairTradingTest = PairTradingTest(data,30,1)
     strategy.__backtest__()
-    #strategy.plot_portfolio_over_time()
+    print(strategy.beta_history)
+    print(len(strategy.beta_history))
+    strategy.plot_portfolio_over_time()
     strategy.plot_time_series_with_signals()
 
 main()

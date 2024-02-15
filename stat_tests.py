@@ -1,4 +1,3 @@
-# TODO Implementation is buggy
 import pandas as pd
 from pandas import Series, DataFrame
 
