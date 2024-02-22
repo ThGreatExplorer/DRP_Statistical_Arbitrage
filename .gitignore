@@ -1,1 +1,4 @@
 .ipynb_checkpoints/
+__pycache__/
+nbs/__pycache__/
+nbs/.ipynb_checkpoints/
