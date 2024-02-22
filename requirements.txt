@@ -1,3 +1,6 @@
 pandas 
 numpy
-statsmodels
+statsmodels.tsa.stattools
+statsmodels.api
+matplotlib.pyplot
+os
